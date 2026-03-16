@@ -99,7 +99,7 @@
 | [WHMCS](https://www.whmcs.com/) | 主机域名管理系统 |
 | [Shopify](https://www.shopify.com/) | 电商平台 |
 | 风铃发卡 | 自动发卡平台 |
-| [ZFAKA](https://github.com/zlkbdotnet/zfaka) | 自动发卡平台，[查看 ZFAKA 专用插件安装教程](https://github.com/utgpay2/zfakausdt) |
+| [ZFAKA](https://github.com/zlkbdotnet/zfaka) | 自动发卡平台，[图文配置教程](https://www.188pay.top/docs/zfaka-epay.html) · [插件源码](https://github.com/utgpay2/zfakausdt) |
 | 鲸发卡 | 自动发卡平台 |
 
 > 所有支持易支付 (EPay) 协议的系统都可以直接接入。
@@ -149,7 +149,7 @@
 
 ### 2. 回调通知
 
-支付成功后，系统向 `notify_url` 发送 **POST** 请求（`Content-Type: application/x-www-form-urlencoded`）。
+支付成功后，系统向 `notify_url` 发送 **GET** 请求，参数通过 URL 查询字符串传递。
 
 **回调参数：**
 
@@ -160,7 +160,7 @@
 | `out_trade_no` | string | 商户订单号 |
 | `money` | string | 订单金额 |
 | `type` | string | 币种类型 |
-| `trade_status` | string | 交易状态（`TRADE_SUCCESS` / `WAIT_BUYER_PAY`） |
+| `trade_status` | string | 交易状态，固定为 `TRADE_SUCCESS`（回调仅在支付成功时发送） |
 | `sign` | string | 签名 |
 | `sign_type` | string | 签名类型（`MD5`） |
 
@@ -295,7 +295,7 @@ curl -X POST https://你的域名/pay/address \
 
 ```
 签名字符串 = "amount=100&coinType=usdt&merchantId=YOUR_ID&merchantOrderId=ORDER_001&notifyUrl=https://..."
-完整字符串 = 签名字符串 + "&secret_key=YOUR_SECRET_KEY"
+完整字符串 = 签名字符串 + "&key=YOUR_SECRET_KEY"
 sign = MD5(完整字符串).toLowerCase()
 ```
 
@@ -312,7 +312,8 @@ sign = MD5(完整字符串).toLowerCase()
   "code": 0,
   "data": {
     "id": "20260220143215123456",
-    "status": "pending",
+    "status": "CREATED",
+    "terminalReason": null,
     "amount": 100,
     "actualAmount": 15.67,
     "coinType": "usdt",
@@ -325,10 +326,11 @@ sign = MD5(完整字符串).toLowerCase()
 
 | 状态值 | 说明 |
 |--------|------|
-| `pending` | 等待支付 |
-| `completed` | 支付成功 |
-| `expired` | 已超时 |
-| `closed` | 已关闭 |
+| `CREATED` | 等待支付 |
+| `PROCESSING` | 链上交易已匹配，等待确认 |
+| `SUCCESS` | 支付成功 |
+| `FAILED` | 支付失败 |
+| `CANCELED` | 已终止（通过 `terminalReason` 区分：`EXPIRED` / `USER_CANCELED` / `ADMIN_CANCELED` / `CLOSED` / `REFUNDED` / `SYSTEM_FAILED`） |
 
 ### 回调通知
 
@@ -343,14 +345,14 @@ sign = MD5(完整字符串).toLowerCase()
 | `amount` | number | 订单金额 |
 | `actual_amount` | number | 实际支付加密货币数量 |
 | `coin_type` | string | 币种类型 |
-| `status` | string | 订单状态（`completed`） |
+| `status` | string | 订单状态（`SUCCESS`） |
 | `tx_hash` | string | 区块链交易哈希 |
 | `sign` | string | 签名 |
 | `sign_type` | string | 签名类型（`MD5`） |
 
 **回调验证签名：**
 
-将回调参数（不含 `sign` 和 `sign_type`）按参数名 ASCII 排序，拼接为 `key=value&` 格式，末尾追加 `&secret_key=你的密钥`，MD5 后与 `sign` 对比。
+将回调参数（不含 `sign` 和 `sign_type`）按参数名 ASCII 排序，拼接为 `key=value&` 格式，末尾追加 `&key=你的密钥`，MD5 后与 `sign` 对比。
 
 ---
 
@@ -384,7 +386,7 @@ foreach ($data as $k => $v) {
 $str = rtrim($str, '&');
 
 // 追加密钥
-$str .= '&secret_key=YOUR_SECRET_KEY';
+$str .= '&key=YOUR_SECRET_KEY';
 
 // 验证签名
 $sign = md5($str);
@@ -416,7 +418,7 @@ function verifyCallback(body, secretKey) {
   // 追加密钥并 MD5
   const computedSign = crypto
     .createHash('md5')
-    .update(sortedStr + '&secret_key=' + secretKey)
+    .update(sortedStr + '&key=' + secretKey)
     .digest('hex');
 
   return computedSign === sign;
@@ -448,7 +450,7 @@ def verify_callback(body: dict, secret_key: str) -> bool:
     sorted_str = '&'.join(f'{k}={filtered[k]}' for k in sorted(filtered))
 
     # 追加密钥并 MD5
-    sign_str = sorted_str + '&secret_key=' + secret_key
+    sign_str = sorted_str + '&key=' + secret_key
     computed_sign = hashlib.md5(sign_str.encode()).hexdigest()
 
     return computed_sign == received_sign
@@ -472,11 +474,11 @@ def callback():
 | 次数 | 间隔 |
 |------|------|
 | 第 1 次 | 15 秒后 |
-| 第 2 次 | 1 分钟后 |
-| 第 3 次 | 5 分钟后 |
-| 第 4 次 | 10 分钟后 |
-| 第 5 次 | 30 分钟后 |
-| 第 6 次 | 60 分钟后 |
+| 第 2 次 | 30 秒后 |
+| 第 3 次 | 1 分钟后 |
+| 第 4 次 | 2 分钟后 |
+| 第 5 次 | 4 分钟后 |
+| 第 6 次 | 8 分钟后 |
 
 共最多重试 6 次。全部失败后可在商户后台手动重发。
 
